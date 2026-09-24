@@ -398,6 +398,16 @@ pub struct App {
     pub lyrics_fullscreen_seen: bool,
     lyrics_fullscreen_restoring: Option<bool>,
     lyrics_restore_maximized: bool,
+    /// The small window with the lyrics and the playback controls is open.
+    pub lyrics_mini: bool,
+    /// Whether the small lyrics window stays above other windows.
+    pub lyrics_mini_on_top: bool,
+    /// Frames left in which the small window asserts its stacking level,
+    /// which a level set while the window is being mapped may not keep.
+    pub lyrics_mini_level_reassert: u8,
+    /// The line the small window last positioned itself for, kept apart
+    /// from the panel's so each follows the song on its own.
+    pub lyrics_mini_line_shown: Option<Option<usize>>,
     pub lyrics_backdrop: crate::images::LyricsBackdrop,
     pub softened_covers: crate::images::SoftenedCovers,
     /// The track the lyrics below are for.
@@ -791,6 +801,10 @@ impl App {
             lyrics_fullscreen_seen: false,
             lyrics_fullscreen_restoring: None,
             lyrics_restore_maximized: false,
+            lyrics_mini: false,
+            lyrics_mini_on_top: false,
+            lyrics_mini_level_reassert: 0,
+            lyrics_mini_line_shown: None,
             lyrics_backdrop: Default::default(),
             softened_covers: Default::default(),
             lyrics_uri: None,
@@ -2576,7 +2590,7 @@ impl App {
         {
             self.refresh_queue(true);
         }
-        if self.show_lyrics_panel {
+        if self.show_lyrics_panel || self.lyrics_mini {
             self.request_lyrics();
         }
     }
@@ -2595,6 +2609,7 @@ impl App {
         self.lyrics_uri = Some(now.uri.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
+        self.lyrics_mini_line_shown = None;
         if now.is_episode || self.offline {
             self.lyrics = Loadable::Loaded(None);
             return;
@@ -8639,6 +8654,25 @@ impl App {
                     self.leave_lyrics_fullscreen(ctx);
                 }
             }
+            Action::SetLyricsMini(open) => {
+                if open && !self.lyrics_mini {
+                    self.lyrics_mini_line_shown = None;
+                    self.lyrics_mini_level_reassert = 3;
+                    self.request_lyrics();
+                }
+                self.lyrics_mini = open;
+            }
+            Action::ToggleLyricsMiniOnTop => {
+                if self.window_level_supported {
+                    self.lyrics_mini_on_top = !self.lyrics_mini_on_top;
+                    self.lyrics_mini_level_reassert = 3;
+                }
+            }
+            Action::LyricsMiniLineShown(line) => {
+                if self.lyrics_mini {
+                    self.lyrics_mini_line_shown = Some(line);
+                }
+            }
             Action::LyricsLineShown(line) => {
                 // Escape or navigation may already have left the view earlier
                 // in this frame. The returning panel still needs to reposition.
@@ -8649,6 +8683,7 @@ impl App {
             Action::FollowLyrics => {
                 self.lyrics_following = true;
                 self.lyrics_line_shown = None;
+                self.lyrics_mini_line_shown = None;
             }
             Action::PauseLyricsFollow => self.lyrics_following = false,
             Action::RetryLyrics => self.request_lyrics(),
@@ -9440,6 +9475,7 @@ impl App {
         } else {
             crate::ui::show(self, ui);
         }
+        crate::ui::lyrics_mini_window(self, ctx);
         self.apply_actions(ctx);
         let autoscroll = self.autoscroll.finish(
             ctx,
@@ -16485,6 +16521,73 @@ mod tests {
                 .collect();
             assert_eq!(commands, vec![true, was_fullscreen]);
         }
+    }
+
+    #[test]
+    fn lyrics_mini_opens_its_own_window_and_leaves_the_main_one_alone() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.apply(Action::SetLyricsMini(true), ui.ctx());
+            assert!(app.lyrics_mini);
+            assert_eq!(app.lyrics_mini_level_reassert, 3);
+            app.apply(Action::SetLyricsMini(false), ui.ctx());
+            assert!(!app.lyrics_mini);
+        });
+        output.textures_delta.clear();
+        assert!(
+            output.viewport_output[&egui::ViewportId::ROOT]
+                .commands
+                .iter()
+                .all(|command| !matches!(
+                    command,
+                    egui::ViewportCommand::InnerSize(_)
+                        | egui::ViewportCommand::MinInnerSize(_)
+                        | egui::ViewportCommand::Fullscreen(_)
+                        | egui::ViewportCommand::Maximized(_)
+                        | egui::ViewportCommand::WindowLevel(_)
+                ))
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_mini_stays_on_top_only_where_the_desktop_allows() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.window_level_supported = false;
+            app.apply(Action::ToggleLyricsMiniOnTop, ui.ctx());
+            assert!(!app.lyrics_mini_on_top);
+            app.window_level_supported = true;
+            app.apply(Action::ToggleLyricsMiniOnTop, ui.ctx());
+            assert!(app.lyrics_mini_on_top);
+            app.apply(Action::ToggleLyricsMiniOnTop, ui.ctx());
+            assert!(!app.lyrics_mini_on_top);
+        });
+        output.textures_delta.clear();
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_mini_follows_the_song_apart_from_the_panel() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.apply(Action::SetLyricsMini(true), ui.ctx());
+            app.lyrics_line_shown = Some(Some(1));
+            app.apply(Action::LyricsMiniLineShown(Some(3)), ui.ctx());
+            assert_eq!(app.lyrics_mini_line_shown, Some(Some(3)));
+            assert_eq!(app.lyrics_line_shown, Some(Some(1)));
+            app.apply(Action::FollowLyrics, ui.ctx());
+            assert_eq!(app.lyrics_mini_line_shown, None);
+            assert_eq!(app.lyrics_line_shown, None);
+            app.apply(Action::SetLyricsMini(false), ui.ctx());
+            app.apply(Action::LyricsMiniLineShown(Some(4)), ui.ctx());
+            assert_eq!(app.lyrics_mini_line_shown, None);
+        });
+        output.textures_delta.clear();
+        app.backend.shutdown();
     }
 
     #[test]

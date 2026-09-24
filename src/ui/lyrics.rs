@@ -13,6 +13,14 @@ const LINE_SIZE: f32 = 19.0;
 const LINE_GAP: f32 = 10.0;
 /// How long a line takes to light up or fade.
 const LIGHT_UP_SECONDS: f32 = 0.22;
+/// The small lyrics window's size when it opens.
+pub(super) const MINI_SIZE: [f32; 2] = [360.0, 540.0];
+/// The smallest the small lyrics window may be dragged to.
+pub(super) const MINI_MIN_SIZE: [f32; 2] = [280.0, 320.0];
+/// The playback controls along the bottom of the small lyrics window.
+const MINI_CONTROLS_HEIGHT: f32 = 84.0;
+/// The song and buttons along the top of the small lyrics window.
+const MINI_HEADER_HEIGHT: f32 = 60.0;
 
 fn blend(from: egui::Color32, to: egui::Color32, t: f32) -> egui::Color32 {
     let t = t.clamp(0.0, 1.0);
@@ -71,6 +79,18 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
                 .clicked()
                 {
                     app.actions.push(Action::SetLyricsFullscreen(true));
+                }
+                if theme::icon_button(
+                    ui,
+                    Icon::Minimize2,
+                    18.0,
+                    palette.secondary,
+                    palette.text,
+                    &gettext(app.locale, "Mini lyrics"),
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::SetLyricsMini(!app.lyrics_mini));
                 }
                 let loaded = matches!(&app.lyrics, Loadable::Loaded(Some(_)));
                 if loaded
@@ -278,8 +298,222 @@ pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
             content.add_space(20.0);
             track_heading(app, &mut content);
             content.add_space(16.0);
-            fullscreen_contents(app, &mut content);
+            let size = (content.available_width() * 0.046).clamp(28.0, 42.0);
+            big_lyrics(
+                app,
+                &mut content,
+                BigLyrics {
+                    mini: false,
+                    size,
+                    gap: 27.0,
+                },
+            );
         });
+}
+
+pub(super) fn mini_viewport() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("lyrics-mini")
+}
+
+/// The small window's contents: the playing song's words and its controls.
+pub(super) fn mini(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    egui::Panel::bottom("lyrics-mini-controls")
+        .exact_size(MINI_CONTROLS_HEIGHT)
+        .resizable(false)
+        .show_separator_line(false)
+        .frame(Frame::new().fill(palette.panel))
+        .show(ui, |ui| {
+            let rect = ui.max_rect();
+            ui.painter().hline(
+                rect.x_range(),
+                rect.top() + 0.5,
+                egui::Stroke::new(1.0, palette.outline),
+            );
+            let now = app.now_playing();
+            let region = Rect::from_min_max(
+                pos2(rect.left(), rect.top() + 4.0),
+                pos2(rect.right(), rect.bottom()),
+            );
+            super::player_bar::transport(app, ui, now.as_ref(), region);
+        });
+    egui::CentralPanel::default()
+        .frame(Frame::new().fill(theme::Palette::dark().window))
+        .show(ui, |ui| {
+            let rect = ui.max_rect();
+            background(app, ui, rect);
+            let header = Rect::from_min_size(rect.min, vec2(rect.width(), MINI_HEADER_HEIGHT));
+            let mut header_ui = ui.new_child(
+                UiBuilder::new()
+                    .max_rect(header.shrink2(vec2(12.0, 8.0)))
+                    .layout(Layout::left_to_right(Align::Center)),
+            );
+            mini_header(app, &mut header_ui);
+            pin_hint(app, ui, header);
+            let region = Rect::from_min_max(
+                pos2(rect.left() + 16.0, header.bottom()),
+                pos2(rect.right() - 16.0, rect.bottom()),
+            );
+            let mut content = ui.new_child(UiBuilder::new().max_rect(region));
+            let size = (content.available_width() * 0.068).clamp(19.0, 28.0);
+            big_lyrics(
+                app,
+                &mut content,
+                BigLyrics {
+                    mini: true,
+                    size,
+                    gap: size * 0.6,
+                },
+            );
+        });
+}
+
+fn pin_hint_id() -> egui::Id {
+    egui::Id::new("lyrics-mini-pin-hint")
+}
+
+/// Where the desktop keeps a window on top when the app cannot, shown for a
+/// while under the header after the pin is clicked.
+fn pin_hint(app: &App, ui: &mut egui::Ui, header: Rect) {
+    const SECONDS: f64 = 8.0;
+    let Some(since) = ui.ctx().data(|data| data.get_temp::<f64>(pin_hint_id())) else {
+        return;
+    };
+    let left = SECONDS - (ui.input(|input| input.time) - since);
+    if left <= 0.0 {
+        ui.ctx().data_mut(|data| data.remove::<f64>(pin_hint_id()));
+        return;
+    }
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_secs_f64(left));
+    let text = gettext(
+        app.locale,
+        "This desktop does not let apps stay on top. Press Alt+Space in this window and choose Always on Top.",
+    );
+    egui::Area::new(pin_hint_id())
+        .order(egui::Order::Foreground)
+        .fixed_pos(pos2(header.left() + 12.0, header.bottom() - 4.0))
+        .show(ui.ctx(), |ui| {
+            Frame::new()
+                .fill(Color32::from_black_alpha(220))
+                .corner_radius(8.0)
+                .inner_margin(Margin::symmetric(12, 10))
+                .show(ui, |ui| {
+                    ui.set_max_width(header.width() - 48.0);
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .font(theme::regular(13.0))
+                                .color(Color32::WHITE),
+                        )
+                        .wrap(),
+                    );
+                });
+        });
+}
+
+/// The playing song, and the button that keeps the small window on top.
+fn mini_header(app: &mut App, ui: &mut egui::Ui) {
+    let palette = theme::Palette::dark();
+    let width = ui.available_width();
+    // The buttons are laid out first, from the right, so the title takes
+    // whatever room they leave.
+    let buttons = ui
+        .with_layout(Layout::right_to_left(Align::Center), |ui| {
+            let supported = app.window_level_supported;
+            let on_top = supported && app.lyrics_mini_on_top;
+            let label = gettext(app.locale, "Keep on top");
+            let pin = theme::icon_button(
+                ui,
+                if on_top { Icon::Pin } else { Icon::PinOff },
+                17.0,
+                if on_top {
+                    palette.accent
+                } else {
+                    palette.secondary
+                },
+                palette.text,
+                &label,
+            );
+            pin.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on_top, &label)
+            });
+            if pin.clicked() {
+                if supported {
+                    app.actions.push(Action::ToggleLyricsMiniOnTop);
+                } else {
+                    // Wayland gives apps no way to raise their own window;
+                    // the desktop's window menu still can, so say where.
+                    let now = ui.input(|input| input.time);
+                    ui.ctx().data_mut(|data| {
+                        let shown = data.get_temp::<f64>(pin_hint_id()).is_some();
+                        if shown {
+                            data.remove::<f64>(pin_hint_id());
+                        } else {
+                            data.insert_temp(pin_hint_id(), now);
+                        }
+                    });
+                }
+            }
+            let loaded = matches!(&app.lyrics, Loadable::Loaded(Some(_)));
+            if loaded
+                && !app.lyrics_following
+                && theme::pill_button(
+                    ui,
+                    &palette,
+                    &pgettext(app.locale, "lyrics", "Follow"),
+                    false,
+                )
+                .clicked()
+            {
+                app.actions.push(Action::FollowLyrics);
+            }
+        })
+        .response
+        .rect
+        .width();
+    let Some(now) = app.now_playing() else {
+        return;
+    };
+    let heading = Rect::from_min_size(
+        ui.max_rect().min,
+        vec2((width - buttons - 8.0).max(0.0), ui.max_rect().height()),
+    );
+    let mut heading_ui = ui.new_child(
+        UiBuilder::new()
+            .max_rect(heading)
+            .layout(Layout::left_to_right(Align::Center)),
+    );
+    let size = 40.0;
+    let (cover, _) = heading_ui.allocate_exact_size(vec2(size, size), Sense::hover());
+    widgets::paint_cover(
+        &heading_ui,
+        &palette,
+        now.art_small.as_deref().or(now.art_url.as_deref()),
+        cover,
+        4.0,
+        Icon::Music,
+        Some(app.backend.art()),
+    );
+    heading_ui.add_space(4.0);
+    heading_ui.vertical(|ui| {
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&now.title)
+                    .font(theme::semibold(15.0))
+                    .color(Color32::WHITE),
+            )
+            .truncate(),
+        );
+        ui.add(
+            egui::Label::new(
+                egui::RichText::new(&now.subtitle)
+                    .font(theme::regular(12.0))
+                    .color(Color32::from_gray(235)),
+            )
+            .truncate(),
+        );
+    });
 }
 
 fn fullscreen_content_width(viewport_width: f32) -> f32 {
@@ -402,7 +636,16 @@ fn track_heading(app: &App, ui: &mut egui::Ui) {
     }
 }
 
-fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
+/// How the large, centred lyrics are drawn in a given view.
+struct BigLyrics {
+    /// The small window keeps its scroll position, line animations, and
+    /// followed line apart from full screen's.
+    mini: bool,
+    size: f32,
+    gap: f32,
+}
+
+fn big_lyrics(app: &mut App, ui: &mut egui::Ui, style: BigLyrics) {
     let palette = theme::Palette::dark();
     let Some(now) = app.now_playing() else {
         widgets::empty_state(
@@ -466,8 +709,18 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
         .iter()
         .any(|action| matches!(action, Action::FollowLyrics))
     {
-        app.actions.push(Action::LyricsLineShown(active));
+        app.actions.push(if style.mini {
+            Action::LyricsMiniLineShown(active)
+        } else {
+            Action::LyricsLineShown(active)
+        });
     }
+    let salt = if style.mini { "mini" } else { "fullscreen" };
+    let shown = if style.mini {
+        app.lyrics_mini_line_shown
+    } else {
+        app.lyrics_line_shown
+    };
     let viewport = ui.available_rect_before_wrap();
     let manual_scroll = ui.rect_contains_pointer(viewport)
         && ui.input(|input| {
@@ -475,16 +728,16 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 || (input.pointer.primary_down() && input.pointer.delta().y != 0.0)
         });
     let following = app.lyrics_following && !manual_scroll;
-    let follow = following && app.lyrics_line_shown != Some(active);
+    let follow = following && shown != Some(active);
     let animation = egui::style::ScrollAnimation::duration(0.45);
-    let size = (ui.available_width() * 0.046).clamp(28.0, 42.0);
+    let size = style.size;
     // The line being sung brightens; all lines keep the same font metrics
     // so highlighting cannot rewrap the words during a transition.
     // A line takes 300 ms to light up or fade.
     let quiet = palette.text.gamma_multiply(0.68);
     ui.spacing_mut().scroll.fade.strength = 0.0;
     egui::ScrollArea::vertical()
-        .id_salt(("fullscreen-lyrics-scroll", &now.uri))
+        .id_salt(("big-lyrics-scroll", salt, &now.uri))
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // Before the first line there is nothing to highlight, so the
@@ -506,7 +759,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
             for (index, line) in lyrics.lines.iter().enumerate() {
                 let is_active = active == Some(index);
                 let lit = ui.ctx().animate_bool_with_time(
-                    egui::Id::new("lyric-line").with(("fullscreen", &now.uri, index)),
+                    egui::Id::new("lyric-line").with((salt, &now.uri, index)),
                     is_active,
                     0.3,
                 );
@@ -557,7 +810,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 if is_active && follow {
                     ui.scroll_to_rect_animation(rect, Some(Align::Center), animation);
                 }
-                ui.add_space(27.0);
+                ui.add_space(style.gap);
             }
             // Words without timing can only be followed by the clock: sit
             // at the part of the text the song is probably at.

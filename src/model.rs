@@ -1057,6 +1057,13 @@ pub enum Action {
     ToggleQueuePanel,
     ToggleLyricsPanel,
     SetLyricsFullscreen(bool),
+    /// Open or close the small window with the lyrics and the playback
+    /// controls.
+    SetLyricsMini(bool),
+    /// Keep the small lyrics window above other windows, or stop.
+    ToggleLyricsMiniOnTop,
+    /// The line the small lyrics window positioned itself for.
+    LyricsMiniLineShown(Option<usize>),
     LyricsLineShown(Option<usize>),
     FollowLyrics,
     PauseLyricsFollow,

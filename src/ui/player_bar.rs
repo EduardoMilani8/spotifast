@@ -287,7 +287,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     }
 }
 
-fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region: Rect) {
+pub(super) fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region: Rect) {
     let palette = app.palette;
     // Everything here is placed with explicit rects: egui's implicit rows
     // centre each widget in the row height known when it is added, which
@@ -489,7 +489,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     match thin_slider(
         &mut slider_ui,
         &palette,
-        egui::Id::new("seek-slider"),
+        ui.id().with("seek-slider"),
         &gettext(app.locale, "Playback position (%)"),
         fraction,
         slider_width,

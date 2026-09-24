@@ -52,9 +52,10 @@ struct Cli {
 
     /// Extra demo surfaces: a comma-separated list of `queue`, `playing-next`,
     /// `devices`, `shortcuts`, `create`, `light`, `focus`, `update`, `personal-app`,
-    /// `windows-taskbar`, `german`, `lyrics`, `lyrics-fullscreen`, `collection-loading`,
-    /// `shuffle-selected`, `shuffle-started`, `library-list`, `library-list-narrow`,
-    /// `library-list-wide`, `library-grid`, `library-grid-narrow`, or `library-grid-wide`.
+    /// `windows-taskbar`, `german`, `lyrics`, `lyrics-fullscreen`, `lyrics-mini`,
+    /// `collection-loading`, `shuffle-selected`, `shuffle-started`, `library-list`,
+    /// `library-list-narrow`, `library-list-wide`, `library-grid`, `library-grid-narrow`,
+    /// or `library-grid-wide`.
     #[cfg(feature = "demo")]
     #[arg(long)]
     demo_show: Option<String>,

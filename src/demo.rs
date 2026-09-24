@@ -927,13 +927,16 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                     },
                 );
             }
-            "lyrics" | "lyrics-fullscreen" => {
+            "lyrics" | "lyrics-fullscreen" | "lyrics-mini" => {
                 app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 if surface == "lyrics-fullscreen" {
                     app.actions.push(Action::SetLyricsFullscreen(true));
+                }
+                if surface == "lyrics-mini" {
+                    app.actions.push(Action::SetLyricsMini(true));
                 }
             }
             // Titles in scripts the interface font does not cover.
@@ -1480,6 +1483,53 @@ mod tests {
             assert!(!app.show_queue_panel);
             app.backend.shutdown();
         }
+    }
+
+    #[test]
+    fn mini_lyrics_opens_a_window_with_the_controls_and_closes_it() {
+        use egui::accesskit::{Action as AccessibleAction, Role};
+
+        let (ctx, mut app) = accessible_app("mini-lyrics");
+        app.show_lyrics_panel = true;
+        app.lyrics_uri = app.now_playing().map(|now| now.uri);
+        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let mini = accessible_node(&tree, "Mini lyrics", Role::Button);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(mini, AccessibleAction::Click, None)],
+        );
+        assert!(app.lyrics_mini);
+        // The main window keeps its panel beside the new window.
+        assert!(app.show_lyrics_panel);
+        // Where the desktop decides stacking, the pin says how to ask it.
+        app.window_level_supported = false;
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let pin = accessible_node(&tree, "Keep on top", Role::CheckBox);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(pin, AccessibleAction::Click, None)],
+        );
+        assert!(!app.lyrics_mini_on_top);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let hint = "This desktop does not let apps stay on top. \
+                    Press Alt+Space in this window and choose Always on Top.";
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some(hint) || node.value() == Some(hint))
+        );
+        let mini = accessible_node(&tree, "Mini lyrics", Role::Button);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(mini, AccessibleAction::Click, None)],
+        );
+        assert!(!app.lyrics_mini);
+        app.backend.shutdown();
     }
 
     #[test]

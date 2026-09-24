@@ -86,6 +86,48 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     window_resize(ui);
 }
 
+/// The small window with the playing song's words and its controls, beside
+/// whichever window the app shows. It is drawn inside that window's frame, so
+/// the two always tell the same story.
+pub fn lyrics_mini_window(app: &mut App, ctx: &Context) {
+    if !app.lyrics_mini || !(app.is_connected() && app.user.is_some()) {
+        return;
+    }
+    let mut builder = egui::ViewportBuilder::default()
+        .with_title(crate::i18n::gettext(app.locale, "Lyrics"))
+        .with_inner_size(lyrics::MINI_SIZE)
+        .with_min_inner_size(lyrics::MINI_MIN_SIZE);
+    #[cfg(target_os = "linux")]
+    {
+        builder = builder.with_app_id(crate::media_controls::desktop_entry());
+    }
+    if app.window_level_supported {
+        builder =
+            builder.with_window_level(crate::app::on_top_window_level(app.lyrics_mini_on_top));
+    }
+    ctx.show_viewport_immediate(lyrics::mini_viewport(), builder, |ui, _| {
+        lyrics::mini(app, ui);
+        let (close, escape) = ui.input(|input| {
+            (
+                input.viewport().close_requested(),
+                input.key_pressed(egui::Key::Escape),
+            )
+        });
+        if close || escape {
+            app.actions.push(Action::SetLyricsMini(false));
+        }
+        // X11 may drop a level set while the window is being mapped.
+        if app.lyrics_mini_level_reassert > 0 && app.window_level_supported {
+            app.lyrics_mini_level_reassert -= 1;
+            ui.ctx()
+                .send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                    crate::app::on_top_window_level(app.lyrics_mini_on_top),
+                ));
+            ui.ctx().request_repaint();
+        }
+    });
+}
+
 /// Keeps the most recent loading preview of each metadata type available to
 /// the loaded hero as an artwork fallback. The fixed typed slot bounds this to
 /// one playlist, album, artist, and show instead of scanning known metadata on

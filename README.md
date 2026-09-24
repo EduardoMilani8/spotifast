@@ -166,7 +166,12 @@ AUR and Homebrew packages now use the Spotifast name. See [rename compatibility]
   to the viewed collection.
 - **Lyrics.** Follow synced lyrics in a side panel or full-screen view, or read
   unsynced lyrics when timestamps are unavailable. Full-screen lyrics scroll
-  smoothly and highlight the playing line automatically.
+  smoothly and highlight the playing line automatically. **Mini lyrics**, the
+  button beside full screen in the lyrics panel, opens a small second window
+  with the words, the song, and the playback controls with the time. Its pin
+  keeps it above other windows where the desktop permits; on Wayland, use the
+  desktop's Always on Top from its window menu (`Alt+Space` on GNOME) or a
+  Keep Above rule. `Esc` or the window's close button closes it.
 - **Resumes the last session.** On startup, the last song is paused where it
   stopped. Play resumes it, and the other playback controls work before it
   starts.
