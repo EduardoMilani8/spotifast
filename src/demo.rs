@@ -1533,6 +1533,28 @@ mod tests {
     }
 
     #[test]
+    fn mini_lyrics_offers_no_follow_with_nothing_playing() {
+        let (ctx, mut app) = accessible_app("mini-lyrics-idle");
+        app.lyrics_uri = app.now_playing().map(|now| now.uri);
+        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.lyrics_mini = true;
+        app.lyrics_following = false;
+        let follows = |tree: &egui::accesskit::TreeUpdate| {
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.label() == Some("Follow"))
+        };
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        assert!(follows(&tree));
+        app.remote = None;
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        assert!(!follows(&tree));
+        app.backend.shutdown();
+    }
+
+    #[test]
     fn translated_lyrics_controls_keep_follow_retry_and_fullscreen_actions() {
         use crate::i18n::{Locale, gettext, pgettext};
         use clap::ValueEnum;

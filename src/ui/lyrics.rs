@@ -455,7 +455,9 @@ fn mini_header(app: &mut App, ui: &mut egui::Ui) {
                     });
                 }
             }
-            let loaded = matches!(&app.lyrics, Loadable::Loaded(Some(_)));
+            // With nothing playing there is no line to follow back to.
+            let loaded =
+                app.now_playing().is_some() && matches!(&app.lyrics, Loadable::Loaded(Some(_)));
             if loaded
                 && !app.lyrics_following
                 && theme::pill_button(
